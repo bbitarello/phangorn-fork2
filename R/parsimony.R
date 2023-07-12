@@ -356,8 +356,8 @@ pratchet <- function(data, start = NULL, method = "fitch", maxit = 1000,
     tree <- keep.tip(tree, label)
     attr(tree, "pscore") <- parsimony(tree, data, method = method, ...)
     mp <- attr(tree, "pscore")
-    if (trace >= 0)
-      print(paste("Best pscore so far:", attr(tree, "pscore")))
+    #if (trace >= 0)
+      #print(paste("Best pscore so far:", attr(tree, "pscore")))
   }
   FUN <- function(data, tree, method, rearrangements, ...)
     optim.parsimony(tree, data = data, method = method,
@@ -444,8 +444,8 @@ pratchet <- function(data, start = NULL, method = "fitch", maxit = 1000,
         }
       }
     }
-    if (trace >= 0)
-      print(paste("Best pscore so far:", mp))
+   # if (trace >= 0)
+   #   print(paste("Best pscore so far:", mp))
     if ( (kmax >= k) && (i >= minit)) break()
   } # for
 }  # pratchet
