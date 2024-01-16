@@ -26,7 +26,13 @@ OTHER CHANGES
 
     o functions Descendants, Ancestors, Siblings, mrca.phy now also accept a
 
-      character vector for the node argument
+      character vector for the node argument.
+
+    o plotAnc got an argument scheme allowing to use different color schemes.
+
+      Some default values changed to produce nicer plots are nicer out of the
+
+      box.
 
 
     CHANGES in PHANGORN VERSION 2.11.0

@@ -1,8 +1,3 @@
-#
-# ancestral sequences ML
-#
-
-
 #' Ancestral character reconstruction.
 #'
 #' Marginal reconstruction of the ancestral character states.
@@ -14,24 +9,29 @@
 #' With parsimony reconstruction one has to keep in mind that there will be
 #' often no unique solution.
 #'
+#' The functions use node labels if these are present and unique. Otherwise the
+#' function \code{ape::MakeNodeLabel} is used to create them.
+#'
 #' For further details see vignette("Ancestral").
 #'
 #' @param object an object of class pml
 #' @param tree a tree, i.e. an object of class pml
 #' @param data an object of class phyDat
 #' @param type method used to assign characters to internal nodes, see details.
-#' @param i plots the i-th site pattern of the \code{data}.
-#' @param col a vector containing the colors for all possible states.
-#' @param cex.pie a numeric defining the size of the pie graphs
-#' @param pos a character string defining the position of the legend
 #' @param cost A cost matrix for the transitions between two states.
 #' @param return return a \code{phyDat} object or matrix of probabilities.
+#' @param x an object of class ancestral.
 #' @param \dots Further arguments passed to or from other methods.
-#' @return %A matrix containing the the estimates character states. An object
-#' of class "phyDat", containing the ancestral states of all nodes.
+#' @return An object of class ancestral containing theestimated character
+#' states.
+#' For \code{return="phyDat"} an object  of class "phyDat", containing
+#' the ancestral states of all nodes. For nucleotide data this can contain
+#' ambiguous states. Apart from fitch parsimony the most likely states are
+#' returned.
 #' @author Klaus Schliep \email{klaus.schliep@@gmail.com}
 #' @seealso \code{\link{pml}}, \code{\link{parsimony}}, \code{\link[ape]{ace}},
-#' \code{\link[ape]{root}}
+#' \code{\link{plotAnc}}, \code{\link[ape]{root}},
+#' \code{\link[ape]{makeNodeLabel}}
 #' @references Felsenstein, J. (2004). \emph{Inferring Phylogenies}. Sinauer
 #' Associates, Sunderland.
 #'
@@ -45,6 +45,8 @@
 #' @examples
 #'
 #' example(NJ)
+#' # generate node labels to ensure plotting will work
+#' tree <- makeNodeLabel(tree)
 #' fit <- pml(tree, Laurasiatherian)
 #' anc.ml <- ancestral.pml(fit, type = "ml")
 #' anc.p <- ancestral.pars(tree, Laurasiatherian)
@@ -60,7 +62,7 @@
 #'
 #' @rdname ancestral.pml
 #' @export
-ancestral.pml <- function(object, type = "marginal", return = "prob") {
+ancestral.pml <- function(object, type = "marginal", return = "prob", ...) {
   call <- match.call()
   pt <- match.arg(type, c("marginal", "joint", "ml", "bayes"))
   tree <- object$tree
@@ -85,9 +87,7 @@ ancestral.pml <- function(object, type = "marginal", return = "prob") {
   dim(dat) <- c(l, m)
 
   x <- attributes(data)
-  label <- as.character(1:m)
-  nam <- tree$tip.label
-  label[seq_along(nam)] <- nam
+  label <- makeAncNodeLabel(tree, ...)
   x[["names"]] <- label
   tmp <- length(data)
 
@@ -110,14 +110,11 @@ ancestral.pml <- function(object, type = "marginal", return = "prob") {
   contrast <- attr(data, "contrast")
   # proper format
   eps <- 1.0e-5
-  ind1 <- which(apply(contrast, 1, function(x) sum(x > eps)) == 1L)
-  ind2 <- which(contrast[ind1, ] > eps, arr.ind = TRUE)
-
-  pos <- ind2[match(seq_len(ncol(contrast)), ind2[, 2]), 1]
+  attr <- attributes(data)
+  pos <- match(attr$levels, attr$allLevels)
   nco <- as.integer(dim(contrast)[1])
   for (i in 1:l) dat[i, (nTips + 1):m] <- .Call('LogLik2', data, P[i, ], nr, nc,
       node, edge, nTips, mNodes, contrast, nco)
-
   parent <- tree$edge[, 1]
   child <- tree$edge[, 2]
   nTips <- min(parent) - 1
@@ -153,28 +150,55 @@ ancestral.pml <- function(object, type = "marginal", return = "prob") {
   }
   attributes(result) <- x
   attr(result, "call") <- call
+  if(return=="prob") class(result) <- c("ancestral", "phyDat")
   result
 }
 
 
-# joint_reconstruction <- function(object){
-#
-# }
 
-
-# in mpr
-ancestral2phyDat <- function(x) {
-  eps <- 1.0e-5
-  contr <- attr(x, "contrast")
-  # a bit too complicated
-  ind1 <- which(apply(contr, 1, function(x) sum(x > eps)) == 1L)
-  ind2 <- which(contr[ind1, ] > eps, arr.ind = TRUE)
-  #    pos <- ind2[match(as.integer(1L:ncol(contr)),  ind2[,2]),1]
-  pos <- ind2[match(seq_len(ncol(contr)), ind2[, 2]), 1]
-  # only first hit
-  res <- lapply(x, function(x, pos) pos[max.col(x)], pos)
+#' @rdname ancestral.pml
+#' @export
+as.phyDat.ancestral <- function(x, ...) {
+  type <- attr(x, "type")
+  fun2 <- function(x) {
+    x <- p2dna(x)
+    fitchCoding2ambiguous(x)
+  }
+  if (type == "DNA") {
+    res <- lapply(x, fun2)
+  }
+  else {
+    eps <- 1.0e-5
+    contr <- attr(x, "contrast")
+    attr <- attributes(x)
+    pos <- match(attr$levels, attr$allLevels)
+    res <- lapply(x, function(x, pos) pos[max.col(x)], pos)
+  }
   attributes(res) <- attributes(x)
+  class(res) <- "phyDat"
   return(res)
+}
+
+
+#' @rdname ancestral.pml
+#' @export
+as.data.frame.ancestral <- function(x, ...) {
+  stopifnot(inherits(x, "ancestral"))
+  l <- length(x)
+  nr <- attr(x, "nr")
+  nc <- attr(x, "nc")
+  index <- attr(x, "index")
+  nr <- length(index)
+  nam <- names(x)
+  X <- matrix(0, l*length(index), nc)
+  j <- 0
+  for(i in seq_len(l)){
+    X[(j+1):(j+nr), ] <- x[[i]][index, ]
+    j <- j + nr
+  }
+  res <- data.frame(Site=rep(seq_len(nr), l), Node=rep(nam, each=nr), X)
+  colnames(res) <- c("Site", "Node", attr(x, "levels"))
+  res
 }
 
 
@@ -188,7 +212,7 @@ fitchCoding2ambiguous <- function(x, type = "DNA") {
 #' @rdname ancestral.pml
 #' @export
 ancestral.pars <- function(tree, data, type = c("MPR", "ACCTRAN", "POSTORDER"),
-                           cost = NULL, return = "prob") {
+                           cost = NULL, return = "prob", ...) {
   call <- match.call()
   type <- match.arg(type)
   if (type == "ACCTRAN" || type=="POSTORDER") {
@@ -233,7 +257,7 @@ mpr.help <- function(tree, data, cost = NULL) {
 }
 
 
-mpr <- function(tree, data, cost = NULL, return = "prob") {
+mpr <- function(tree, data, cost = NULL, return = "prob", ...) {
   data <- subset(data, tree$tip.label)
   att <- attributes(data)
   type <- att$type
@@ -242,9 +266,7 @@ mpr <- function(tree, data, cost = NULL, return = "prob") {
   res <- mpr.help(tree, data, cost)
   l <- length(tree$tip.label)
   m <- length(res)
-  label <- as.character(1:m)
-  nam <- tree$tip.label
-  label[seq_along(nam)] <- nam
+  label <- makeAncNodeLabel(tree, ...)
   att[["names"]] <- label
   ntips <- length(tree$tip.label)
   contrast <- att$contrast
@@ -260,10 +282,11 @@ mpr <- function(tree, data, cost = NULL, return = "prob") {
   for (i in (ntips + 1):m) res[[i]][] <- as.numeric(res[[i]] < RM)
   if (return == "prob") {
     #        for(i in 1:ntips) res[[i]] <- contrast[data[[i]],,drop=FALSE]
-    if (return == "prob") res <- lapply(res, fun)
+    res <- lapply(res, fun)
+    attributes(res) <- att
+    class(res) <- c("ancestral", "phyDat")
   }
   #    else res[1:ntips] <- data[1:ntips]
-  attributes(res) <- att
   fun2 <- function(x) {
     x <- p2dna(x)
     fitchCoding2ambiguous(x)
@@ -274,7 +297,8 @@ mpr <- function(tree, data, cost = NULL, return = "prob") {
       attributes(res) <- att
     }
     else {
-      res <- ancestral2phyDat(res)
+      attributes(res) <- att
+      res <- as.phyDat.ancestral(res)
     }
     res[1:ntips] <- data
   }
@@ -282,45 +306,9 @@ mpr <- function(tree, data, cost = NULL, return = "prob") {
 }
 
 
-#' @rdname ancestral.pml
-#' @param site.pattern logical, plot i-th site pattern or i-th site
-#' @importFrom grDevices hcl.colors
-#' @export
-plotAnc <- function(tree, data, i = 1, site.pattern = TRUE, col = NULL,
-                    cex.pie = par("cex"), pos = "bottomright", ...) {
-  y <- subset(data, select = i, site.pattern = site.pattern)
-  CEX <- cex.pie
-  xrad <- CEX * diff(par("usr")[1:2]) / 50
-  levels <- attr(data, "levels")
-  nc <- attr(data, "nc")
-  y <- matrix(unlist(y[]), ncol = nc, byrow = TRUE)
-  l <- dim(y)[1]
-  dat <- matrix(0, l, nc)
-  for (i in 1:l) dat[i, ] <- y[[i]]
-  plot(tree, label.offset = 1.1 * xrad, plot = FALSE, ...)
-  lastPP <- get("last_plot.phylo", envir = .PlotPhyloEnv)
-  XX <- lastPP$xx
-  YY <- lastPP$yy
-  xrad <- CEX * diff(lastPP$x.lim * 1.1) / 50
-  par(new = TRUE)
-  plot(tree, label.offset = 1.1 * xrad, plot = TRUE, ...)
-  if (is.null(col)) col <-  hcl.colors(nc) #rainbow(nc)
-  if (length(col) != nc) {
-    warning("Length of color vector differs from number of levels!")
-  }
-  BOTHlabels(
-    pie = y, XX = XX, YY = YY, adj = c(0.5, 0.5), frame = "rect", pch = NULL,
-    sel = seq_along(XX), thermo = NULL, piecol = col, col = "black",
-    bg = "lightblue", horiz = FALSE, width = NULL, height = NULL, cex = cex.pie
-  )
-  if (!is.null(pos)) legend(pos, legend=levels, text.col = col)
-}
-
 #
 # ACCTRAN
 #
-
-
 acctran2 <- function(tree, data) {
   if(!is.binary(tree)) tree <- multi2di(tree)
   tree <- reorder(tree, "postorder")
@@ -333,7 +321,7 @@ acctran2 <- function(tree, data) {
   f$traverse(edge)
   if(length(tmp)>0)f$acctran_traverse(tmp)
   psc <- f$pscore_acctran(edge)
-  el <- psc #[edge[,2]]
+  el <- psc
   parent <- unique(edge[,1])
   desc <- Descendants(tree, parent, "children")
   for(i in seq_along(parent)){
@@ -363,7 +351,7 @@ acctran <- function(tree, data) {
 }
 
 
-ptree <- function(tree, data, return = "prob", acctran=TRUE) {
+ptree <- function(tree, data, return = "prob", acctran=TRUE, ...) {
   tree <- reorder(tree, "postorder")
   data <- subset(data, tree$tip.label)
   edge <- tree$edge
@@ -378,15 +366,14 @@ ptree <- function(tree, data, return = "prob", acctran=TRUE) {
   tmp <- tmp[tmp[,2]>Ntip(tree),]
   if(length(tmp)>0 && acctran==TRUE)f$acctran_traverse(tmp)
   res <- vector("list", m)
-  att$names <- c(att$names, as.character((nTip+1):m))
-  if(return == "phyDat"){
-    if(type=="DNA"){
-      indx <- c(1, 2, 6, 3, 7, 9, 12, 4, 8, 10, 13, 11, 14, 15, 16)
-      res[1:nTip] <- data[1:nTip]
-      for(i in (nTip+1):m)
-        res[[i]] <- indx[f$getAncAmb(i)[1:nr]]
-    }
-    else stop("This is only for nucleotide sequences supported so far")
+  att$names <- makeAncNodeLabel(tree, ...)
+  if(type=="DNA" && return != "prob"){
+    indx <- c(1, 2, 6, 3, 7, 9, 12, 4, 8, 10, 13, 11, 14, 15, 16)
+    res[1:nTip] <- data[1:nTip]
+    for(i in (nTip+1):m)
+      res[[i]] <- indx[f$getAncAmb(i)[1:nr]]
+    attributes(res) <- att
+    return(res)
   }
   else {
     fun <- function(X) {
@@ -397,15 +384,23 @@ ptree <- function(tree, data, return = "prob", acctran=TRUE) {
     for(i in seq_len(nTip)) res[[i]] <- contrast[data[[i]], , drop=FALSE]
     for(i in (nTip+1):m) res[[i]] <- f$getAnc(i)[1:nr, , drop=FALSE]
     res <- lapply(res, fun)
+    attributes(res) <- att
+    class(res) <- c("ancestral", "phyDat")
   }
-  attributes(res) <- att
+  if(return != "prob"){
+    res <- as.phyDat.ancestral(res)
+    class(res) <- "phyDat"
+  }
   res
 }
 
-#parsimony.plot <- function(tree, ...) {
-#  x <- numeric(max(tree$edge))
-#  x[tree$edge[, 2]] <- tree$edge.length
-#  plot(tree, ...)
-#  ind <- get("last_plot.phylo", envir = .PlotPhyloEnv)$edge[, 2]
-#  edgelabels(prettyNum(x[ind]), frame = "none")
-#}
+
+makeAncNodeLabel <- function(tree, ...){
+  if(!is.null(tree$node.label)){
+    node_label <- tree$node.label
+    if(length(unique(node_label)) == Nnode(tree)) return(c(tree$tip.label, node_label))
+    else message("Node labels are not unique, used makeNodeLabel(tree, ...) to create them!")
+  }
+  tree <- makeNodeLabel(tree, ...)
+  c(tree$tip.label, tree$node.label)
+}
